@@ -182,7 +182,7 @@ class StockFilter:
                 # 修复PE筛选问题：确保PE值是数字类型，如果是None则设为0
                 if pe_ratio is None:
                     pe_ratio = 0
-                
+
                 # 过滤掉PE为0或负数的股票（可能是亏损股）
                 if 0 < pe_ratio <= self.config['max_pe_ratio']:
                     filtered_stocks.append(stock)
@@ -191,6 +191,23 @@ class StockFilter:
                 continue
 
         logger.info(f"PE筛选后剩余 {len(filtered_stocks)} 只股票")
+        return filtered_stocks
+
+    def filter_by_roe(self, stocks_data: List[Dict]) -> List[Dict]:
+        """过滤ROE为负的亏损股"""
+        filtered_stocks = []
+
+        for stock in stocks_data:
+            try:
+                roe = stock.get('roe', 0)
+                # 过滤ROE为负数或None的股票
+                if roe and roe > 0:
+                    filtered_stocks.append(stock)
+            except Exception as e:
+                logger.error(f"ROE筛选失败 {stock.get('code', 'unknown')}: {e}")
+                continue
+
+        logger.info(f"ROE筛选后剩余 {len(filtered_stocks)} 只股票（排除亏损股）")
         return filtered_stocks
 
     def filter_by_strength(self, stocks_data: List[Dict]) -> List[Dict]:
@@ -272,19 +289,22 @@ class StockFilter:
             # 1. 首先按PE筛选
             pe_filtered = self.filter_by_pe_ratio(stocks_data)
 
-            # 2. 应用额外筛选条件
-            additional_filtered = self.apply_additional_filters(pe_filtered)
+            # 2. 过滤ROE为负的亏损股
+            roe_filtered = self.filter_by_roe(pe_filtered)
 
-            # 3. 按强势筛选并排序
+            # 3. 应用额外筛选条件
+            additional_filtered = self.apply_additional_filters(roe_filtered)
+
+            # 4. 按强势筛选并排序
             strength_filtered = self.filter_by_strength(additional_filtered)
 
-            # 4. 直接按分数排序，不限制行业
+            # 5. 直接按分数排序，不限制行业
             strength_filtered.sort(key=lambda x: x['strength_score'], reverse=True)
 
-            # 5. 选择前N只股票
+            # 6. 选择前N只股票
             final_selection = strength_filtered[:self.config['max_stocks']]
 
-            # 6. 添加选择理由和排名
+            # 7. 添加选择理由和排名
             for i, stock in enumerate(final_selection):
                 stock['rank'] = i + 1
                 stock['selection_reason'] = self._generate_selection_reason(stock)
@@ -369,7 +389,7 @@ class StockFilter:
         return {'total': score, 'breakdown': breakdown, 'grade': grade}
 
     def select_top_stocks_offensive(self, stocks_data: List[Dict]) -> List[Dict]:
-        """进攻模式选股：PE<30 + 进攻评分 + 取前N"""
+        """进攻模式选股：PE<30 + ROE>0 + 进攻评分 + 取前N"""
         unique_stocks = {}
         for stock in stocks_data:
             code = stock.get('code')
@@ -378,7 +398,8 @@ class StockFilter:
         stocks_data = list(unique_stocks.values())
 
         pe_filtered = self.filter_by_pe_ratio(stocks_data)
-        additional_filtered = self.apply_additional_filters(pe_filtered)
+        roe_filtered = self.filter_by_roe(pe_filtered)
+        additional_filtered = self.apply_additional_filters(roe_filtered)
 
         for stock in additional_filtered:
             score_result = self.calculate_offensive_score(stock)
@@ -395,7 +416,7 @@ class StockFilter:
         return final
 
     def select_top_stocks_ultra_defensive(self, stocks_data: List[Dict]) -> List[Dict]:
-        """超防守模式选股：PE<30 + 超防守评分 + 取前N"""
+        """超防守模式选股：PE<30 + ROE>0 + 超防守评分 + 取前N"""
         unique_stocks = {}
         for stock in stocks_data:
             code = stock.get('code')
@@ -404,7 +425,8 @@ class StockFilter:
         stocks_data = list(unique_stocks.values())
 
         pe_filtered = self.filter_by_pe_ratio(stocks_data)
-        additional_filtered = self.apply_additional_filters(pe_filtered)
+        roe_filtered = self.filter_by_roe(pe_filtered)
+        additional_filtered = self.apply_additional_filters(roe_filtered)
 
         for stock in additional_filtered:
             score_result = self.calculate_ultra_defensive_score(stock)
